@@ -4,22 +4,9 @@ import argparse
 from pathlib import Path
 
 import cv2
-import numpy as np
 
-from panorama.alignment import BaselineHomographyAligner
-from panorama.refine import seam_local_refine
-from panorama.risk_map import build_risk_map, depth_discontinuity_from_depth, edge_strength
-from panorama.seam import min_vertical_seam, seam_band_mask
+from panorama.pipeline import run_full_pipeline
 from panorama.types import PairSample
-
-
-def load_gray_depth_proxy(img: np.ndarray) -> np.ndarray:
-    """Temporary depth proxy for local testing.
-
-    Real project step: replace with MiDaS/DPT depth prediction.
-    """
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    return gray
 
 
 def main() -> None:
@@ -39,26 +26,14 @@ def main() -> None:
 
     sample = PairSample(pair_id="demo", image_a=a, image_b=b)
 
-    aligner = BaselineHomographyAligner()
-    aligned = aligner.run(sample)
+    outputs = run_full_pipeline(sample)
 
-    depth_proxy = load_gray_depth_proxy(a)
-    depth_disc = depth_discontinuity_from_depth(depth_proxy)
-    edge = edge_strength(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY))
-
-    semantic_boundary = edge
-    risk = build_risk_map(depth_disc, semantic_boundary, edge, aligned.residual_flow_mag)
-
-    seam_cost = risk * aligned.overlap_mask.astype(np.float32)
-    seam = min_vertical_seam(seam_cost)
-    band = seam_band_mask(seam, width=64, img_w=a.shape[1])
-
-    refined = seam_local_refine(a, aligned.warped_b_to_a, band)
-
-    cv2.imwrite(str(out_dir / "warped_b.png"), aligned.warped_b_to_a)
-    cv2.imwrite(str(out_dir / "risk_map.png"), (risk * 255).astype(np.uint8))
-    cv2.imwrite(str(out_dir / "seam_band.png"), band * 255)
-    cv2.imwrite(str(out_dir / "refined.png"), refined)
+    cv2.imwrite(str(out_dir / "aligned.png"), outputs["aligned"])
+    cv2.imwrite(str(out_dir / "risk_map.png"), (outputs["risk_map"] * 255).astype(np.uint8))
+    cv2.imwrite(str(out_dir / "dynamic_mask.png"), (outputs["dynamic_mask"] * 255).astype(np.uint8))
+    cv2.imwrite(str(out_dir / "seam_band.png"), outputs["seam_band"] * 255)
+    cv2.imwrite(str(out_dir / "refined.png"), outputs["refined"])
+    cv2.imwrite(str(out_dir / "composed.png"), outputs["composed"])
 
 
 if __name__ == "__main__":
